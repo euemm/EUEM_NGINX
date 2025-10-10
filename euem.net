@@ -1,0 +1,85 @@
+# ── Helpers ────────────────────────────────────────────────────────────────────
+map $request_uri $x_forwarded_prefix {
+  ~^/ssh(?:/|$)      /ssh;
+  ~^/web-rtc(?:/|$)  /web-rtc;
+  default            "";
+}
+
+# --- HTTP (80) : ACME + redirect to HTTPS ---------------------------------
+server {
+  listen 80;
+  listen [::]:80;
+  server_name euem.net www.euem.net;
+
+  # Allow Let's Encrypt HTTP-01 challenges
+  location ^~ /.well-known/acme-challenge/ {
+    root /var/www/letsencrypt;
+    default_type "text/plain";
+    allow all;
+  }
+
+  # Health check (simple, fast)
+  location = /healthz {
+    add_header Content-Type text/plain;
+    return 200 "ok\n";
+  }
+
+  # Redirect everything else to HTTPS
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}
+
+# ── HTTPS : main vhost ─────────────────────────────────────────────────────────
+server {
+  listen 443 ssl http2;
+  server_name euem.net;
+
+  # TLS
+  ssl_certificate     /etc/letsencrypt/live/euem.net/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/euem.net/privkey.pem;
+  include /etc/letsencrypt/options-ssl-nginx.conf;   # provided by certbot
+  ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;     # provided by certbot
+
+  # ---- Common proxy defaults (apply to every proxy_pass in this server) ----
+  proxy_set_header Host              $host;
+  proxy_set_header X-Real-IP         $remote_addr;
+  proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+
+  # One place to set the mount-aware prefix:
+  proxy_set_header X-Forwarded-Prefix $x_forwarded_prefix;
+
+  # WebSocket friendliness and streaming defaults
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade    $http_upgrade;
+  proxy_set_header Connection $connection_upgrade;
+  proxy_read_timeout 3600;
+  proxy_send_timeout 3600;
+  proxy_buffering off;
+  proxy_redirect off;
+
+  # ── /ssh → :3000 (prefix stripped; app sees /) ─────────────────────────────
+  location = /ssh { return 301 /ssh/; }
+  location /ssh/ {
+    proxy_pass http://127.0.0.1:3000/;   # trailing slash strips /ssh/
+  }
+
+  # ── /web-rtc → :3001 (prefix stripped) ─────────────────────────────────────
+  location = /web-rtc { return 301 /web-rtc/; }
+  location /web-rtc/ {
+    proxy_pass http://127.0.0.1:3001/;
+  }
+
+  # ── /ssh-ws → :8000 (prefix stripped) ──────────────────────────────────────
+  location = /ssh-ws { return 301 /ssh-ws/; }
+  location /ssh-ws/ {
+    proxy_pass http://127.0.0.1:8000/;
+  }
+
+  # ── /rtc-ws → :8080 (prefix stripped) ──────────────────────────────────────
+  location = /rtc-ws { return 301 /rtc-ws/; }
+  location /rtc-ws/ {
+    proxy_pass http://127.0.0.1:8080/;
+  }
+}
