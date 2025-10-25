@@ -5,11 +5,6 @@ map $request_uri $x_forwarded_prefix {
   default            "";
 }
 
-map $http_upgrade $connection_upgrade {
-  default upgrade;
-  ''      close;
-}
-
 # --- HTTP (80) : ACME + redirect to HTTPS ---------------------------------
 server {
   listen 80;
@@ -66,30 +61,33 @@ server {
 
   # ── /ssh → :3000 (prefix stripped; app sees /) ─────────────────────────────
   location = /ssh { return 301 /ssh/; }
-  location ~ ^/ssh(/.*)?$ {
-    proxy_pass http://127.0.0.1:3000$1;
+  location /ssh/ {
+    proxy_pass http://127.0.0.1:3000/;   # trailing slash strips /ssh/
   }
 
   # ── /web-rtc → :3001 (prefix stripped) ─────────────────────────────────────
-  location = /web-rtc { return 301 /web-rtc/; }
-  location ~ ^/web-rtc(/.*)?$ {
-    proxy_pass http://127.0.0.1:3030$1;
+  location = /web-rtc { 
+    return 301 /web-rtc/; 
+  }
+  location /web-rtc/ {
+    proxy_pass http://127.0.0.1:3001/;
   }
 
   # ── /ssh-ws → :8000 (prefix stripped) ──────────────────────────────────────
   location = /ssh-ws { return 301 /ssh-ws/; }
-  location ~ ^/ssh-ws(/.*)?$ {
-    proxy_pass http://127.0.0.1:8000$1;
+  location /ssh-ws/ {
+    proxy_pass http://127.0.0.1:8000/;
   }
 
   # ── /rtc-ws → :8080 (prefix stripped) ──────────────────────────────────────
   location = /rtc-ws { return 301 /rtc-ws/; }
-  location ~ ^/rtc-ws(/.*)?$ {
-    proxy_pass http://127.0.0.1:8080$1;
+  location /rtc-ws/ {
+    proxy_pass http://127.0.0.1:8080/;
   }
 
-  # ── / → :3333 (prefix stripped) ──────────────────────────────────────
-  location ~ ^/(/.*)?$ {
-    proxy_pass http://127.0.0.1:3333$1;
+  # ── / → :3333 (Next.js server) ─────────────────────────────────────────────
+  # This should be last to catch all unmatched requests
+  location / {
+    proxy_pass http://127.0.0.1:3333/;
   }
 }
